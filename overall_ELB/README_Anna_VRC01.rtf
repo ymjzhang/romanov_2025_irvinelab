@@ -1,0 +1,255 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2822
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;\f1\fswiss\fcharset0 Helvetica-Bold;\f2\fnil\fcharset0 AppleColorEmoji;
+\f3\fswiss\fcharset0 Helvetica-Oblique;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww18300\viewh11140\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs36 \cf0 Date created: July 29, 2025\
+Created by: Jason Zhang\
+Last modified on: July 29, 2025\
+Last modified by: Jason Zhang\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\b \cf0 1. combine the four lanes into one fastq file for easier transfer and consolidation of files. \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b0 \cf0 vi merge_fastqs.sh\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\li1444\fi-1445\pardirnatural\partightenfactor0
+\cf0 #!/bin/bash\
+# Exit on error\
+set -e\
+# Step 1: Create geo_submission directory\
+mkdir -p geo_submission\
+# Step 2: Copy all .fastq.gz files into geo_submission\
+cp *.fastq.gz geo_submission/\
+# Step 3: Go into geo_submission\
+cd geo_submission\
+# Step 4: Merge files grouped by sample and read type\
+# Extract unique sample + S# identifiers (e.g., D25-8969_S1)\
+for sample in $(ls *.fastq.gz | sed -E 's/_L00[1-4]_[RI][12]_001\\.fastq\\.gz//' | sort -u); do\
+  for read in R1 R2 I1 I2; do\
+    # Gather matching files\
+    files=$(ls $\{sample\}_L00*_$\{read\}_001.fastq.gz 2>/dev/null || true)\
+\
+    if [[ -n "$files" ]]; then\
+      # Extract sample name and sample index (S1, S2, etc.)\
+      sample_name=$(echo $sample | cut -d'_' -f1)\
+      sample_id=$(echo $sample | cut -d'_' -f2)\
+\
+      # Compose output file name\
+      out_name="$\{sample_name\}_$\{sample_id\}_L-merged_$\{read\}_001.fastq.gz"\
+\
+      echo "Merging files into $out_name"\
+      cat $files > $out_name\
+    fi\
+  done\
+done\
+\
+echo "
+\f2 \uc0\u9989 
+\f0  All merging complete. Output files are in geo_submission/"\
+find geo_submission/ -maxdepth 1 -type f -name "*.fastq.gz" ! -name "*merge*" -delete\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+\cf0 rm geo_submission/Undetermined_S0_L-merged_*\
+\
+Then, rename filenames from L-merged to L001\
+#!/bin/bash\
+for f in *L-merged*.fastq.gz; do\
+  mv "$f" "$\{f/L-merged/L001\}"\
+done\
+\
+\
+
+\f1\b 2. Move things to 10x cloud analysis 
+\f0\b0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 In the geo_submission folder, type: \
+~/data/txg-linux-v2.0.1/txg fastqs upload --project-id J42vLVnwSZOUUGW91WmAvvQ .\
+\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\b \cf0 3. Create VRC01 mouse VDJ reference 
+\f0\b0 \
+mkdir VRC01_vdj_ref\
+# download IMGT mouse data base \
+# https://support.10xgenomics.com/single-cell-vdj/software/pipelines/latest/advanced/references#segment\
+source ~/data/cellranger-9.0.1/sourceme.bash \
+~/data/cellranger-9.0.1/lib/bin/fetch-imgt --genome vdj_IMGT_mouse --species "Mus musculus"\
+add human Ighv1-2 gene into the vdj_IMGT_mouse-mkvdjref-input.fasta file:\
+>1528|IGHV1-2human*02 human|IGHV1-2human|L-REGION+V-REGION|IG|IGH|None|02\
+CAGGTGCAGCTGGTGCAGTCTGGGGCTGAGGTGAAGAAGCCTGGGGCCTCAGTGAAGGTCTCCTGCAAGGCTTCTGGATACACCTTCACCGGCTACTATATGCACTGGGTGCGACAGGCCCCTGGACAAGGGCTTGAGTGGATGGGATGGATCAACCCTAACAGTGGTGGCACAAACTATGCACAGAAGTTTCAGGGCAGGGTCACCATGACCAGGGACACGTCCATCAGCACAGCCTACATGGAGCTGAGCAGGCTGAGATCTGACGACACGGCCGTGTATTACTGTGCGAGAGA\
+\
+# start a new bcc session\
+srun -p bcc --pty bash\
+~/data/cellranger-9.0.1/cellranger mkvdjref --genome=vdj_IMGT_VRC01_mouse --seqs=vdj_VRC01_mouse-mkvdjref-input.fasta\
+# upload the reference\
+~/data/txg-linux-v2.0.1/txg references upload vdj_IMGT_VRC01_mouse/\
+\
+
+\f1\b 4. To double check the cell hashing worked, type out the following command
+\f0\b0 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+\cf0 zcat D25-8973_S5_L001_R2_001.fastq.gz | awk 'NR % 4 == 2' | cut -c11-25 | sort | uniq -c | sort -nr | head\
+# count how many times a hashtag is seen\
+zcat D25-8973_S5_L001_R2_001.fastq.gz | awk 'NR % 4 == 2' | grep -c "GGTCGAGAGCATTCA"\
+*****FB reads just picked up the poly-dT primer******\
+\
+
+\f1\b 5. Alternative strategy to do VDJ assignment
+\f0\b0  \
+# Found out that most of heavy chain contigs were mapped to mouse v genes even using the custom VRC01 mouse VDJ reference. \
+# Do de novo VDJ contig building. Download the all contig fasta files.\
+
+\f1\b a. Do IgBLAST using mouse reference on de novo generated VDJ sequences for each sample.
+\f0\b0  \
+vi assign_genes.sh \
+module load python3\
+module load changeo\
+module load igblast\
+\
+AssignGenes.py igblast -s d1_all_contig.fasta --organism mouse --loci ig --format blast -b ~/data/share1/igblast \
+MakeDb.py igblast -i d1_all_contig_igblast.fmt7 -s d1_all_contig.fasta --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed\
+\
+AssignGenes.py igblast -s d2_all_contig.fasta --organism mouse --loci ig --format blast -b ~/data/share1/igblast\
+MakeDb.py igblast -i d2_all_contig_igblast.fmt7 -s d2_all_contig.fasta --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed\
+\
+AssignGenes.py igblast -s p1_all_contig.fasta --organism mouse --loci ig --format blast -b ~/data/share1/igblast\
+MakeDb.py igblast -i p1_all_contig_igblast.fmt7 -s p1_all_contig.fasta --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed\
+\
+AssignGenes.py igblast -s p2_all_contig.fasta --organism mouse --loci ig --format blast -b ~/data/share1/igblast\
+MakeDb.py igblast -i p2_all_contig_igblast.fmt7 -s p2_all_contig.fasta --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed\
+\
+# do things in airr format \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+
+\f3\i \cf0 mkdir try2_airr_format\
+cp *.fasta try2_airr_format\
+vi assign_genes.sh\
+module load python3\
+module load changeo\
+module load igblast\
+\
+AssignGenes.py igblast --organism mouse --loci ig --format blast -b ~/data/share1/igblast -s d1_all_contig.fasta\
+MakeDb.py igblast --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed --format airr -i d1_all_contig_igblast.fmt7 -s d1_all_contig.fasta\
+\
+AssignGenes.py igblast --organism mouse --loci ig --format blast -b ~/data/share1/igblast -s d2_all_contig.fasta\
+MakeDb.py igblast --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed --format airr -i d2_all_contig_igblast.fmt7 -s d2_all_contig.fasta\
+\
+AssignGenes.py igblast --organism mouse --loci ig --format blast -b ~/data/share1/igblast -s p1_all_contig.fasta\
+MakeDb.py igblast --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed --format airr -i p1_all_contig_igblast.fmt7 -s p1_all_contig.fasta\
+\
+AssignGenes.py igblast --organism mouse --loci ig --format blast -b ~/data/share1/igblast -s p2_all_contig.fasta\
+MakeDb.py igblast --extended --partial -r ~/data/share1/germlines/imgt/mouse/vdj/ --failed --format airr -i p2_all_contig_igblast.fmt7 -s p2_all_contig.fasta
+\f0\i0 \
+\
+In R, perform IgBLAST-like local alignment (pairwiseAlignment function from Biostrings package; gapOpening = -5, gapExtension = -2, match = 1, mismatch = -3) to human IGHV1-2 for heavy chain contigs, and over-write mouse V-gene assignments. \
+\
+\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+
+\f1\b \cf0 6. Do feature barcoding quantification on luria
+\f0\b0 \
+	
+\f1\b a. make a new folder with all the hto fastq files in 10x-fastqs folder
+\f0\b0 \
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+
+\f3\i \cf0 mkdir hto_fastqs\
+cd hto_fastqs\
+cp ../geo_submission/D25-8969*.fastq.gz .\
+cp ../geo_submission/D25-8970*.fastq.gz .\
+cp ../geo_submission/D25-8971*.fastq.gz .\
+cp ../geo_submission/D25-8972*.fastq.gz .
+\f0\i0 \
+\
+	
+\f1\b b. in hto_fastq/ folder make a bash script that runs cellranger
+\f0\b0 \
+
+\f3\i vi jz_cellranger_fb.sh\
+#!/bin/bash\
+#SBATCH -N 1 # Number of nodes. \
+#SBATCH --mail-type=FAIL # Type of email notification- BEGIN,END,FAIL,ALL. \
+#SBATCH --mail-user=ymjzhang@mit.edu\
+#SBATCH --partition bcc\
+\
+# add cellranger to PATH \
+export PATH=~/data/cellranger-9.0.1:$PATH\
+cellranger count --id=$1 --libraries=$2 --feature-ref=5p_hashing_demux.csv --create-bam false 
+\f0\i0 \
+\
+	
+\f1\b c. make a python script that calls on jz_cellranger_fb.sh
+\f0\b0 \
+
+\f3\i vi jz_cellranger_fb.py\
+\
+import pandas as pd\
+import os\
+from glob import glob \
+\
+samples = glob('*.fastq.gz')\
+samples = [x.split('_')[0] for x in samples]\
+samples = list(set(samples))\
+print(samples)\
+\
+library_dir = 'library_files'\
+output_folder = 'fb_ct_output'\
+os.makedirs(library_dir, exist_ok=True)\
+fastq_path = '/net/bmc-lab6/data/lab/love/ymjzhang/250604Irv_Anna/10x-7208L/10x-fastqs/hto_fastqs/'\
+\
+for curr in samples:\
+	# make a folder for each sample\
+	os.makedirs(curr+'_folder', exist_ok=True)\
+	os.system(f'cp \{curr\}*.fastq.gz \{curr\}_folder')\
+	# create the library.csv for each sample\
+	library = pd.DataFrame(\{'fastqs': [f'\{fastq_path\}/\{curr\}_folder']\})\
+	library['sample'] = curr\
+	library['library_type'] = 'Antibody Capture'\
+	print(library)\
+	library_path = library_dir+'/'+curr+'_library.csv'\
+	library.to_csv(library_path, index=False)\
+	command = f'sbatch jz_cellranger_fb.sh \{curr\} \{library_path\}'\
+	print(command)\
+	os.system(command)
+\f0\i0 \
+\
+	
+\f1\b d. Make a CSV file for HTOs. 
+\f0\b0 \
+
+\f3\i id	name	read	pattern	sequence	feature_type\
+HTO1	TotalSeq-C0301	R2	"	5PNNNNNNNNNN(BC)"	ACCCACCAGTAAGAC	Antibody Capture\
+HTO2	TotalSeq-C0302	R2	"	5PNNNNNNNNNN(BC)"	GGTCGAGAGCATTCA	Antibody Capture\
+HTO3	TotalSeq-C0303	R2	"	5PNNNNNNNNNN(BC)"	CTTGCCGCATGTCAT	Antibody Capture\
+HTO4	TotalSeq-C0304	R2	"	5PNNNNNNNNNN(BC)"	AAAGCATTCTTCACG	Antibody Capture
+\f0\i0 \
+\
+	
+\f1\b e. run the script 
+\f0\b0 \
+
+\f3\i module load python3\
+python3 jz_cellranger_fb.py
+\f0\i0 \
+\
+\pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\pardirnatural\partightenfactor0
+
+\f1\b \cf0 7. Submit data to GEO
+\f0\b0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f3\i\fs34 \cf0 lftp ftp://geoftp:inAlwokhodAbnib5@ftp-private.ncbi.nlm.nih.gov\
+cd uploads/ymjzhang@mit.edu_whGdw0OK\
+
+\f0\i0 mirror -R upload_folder\
+\
+
+\f1\b 8. Submit scripts to github
+\f0\b0 \
+
+\fs36 \
+}
